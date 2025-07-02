@@ -1,0 +1,370 @@
+const express = require('express');
+const mongoose = require('mongoose');
+const cors = require('cors');
+require('dotenv').config();
+const Project = require('./models/projectModel');
+const bcrypt = require('bcryptjs');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const cloudinary = require('cloudinary').v2;
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+const jwt = require('jsonwebtoken');
+const { protect } = require('./middleware/authMiddleware');
+const User = require('./models/userModel');
+const Log = require('./models/logModel');
+const SiteSettings = require('./models/siteSettingsModel');
+
+const app = express();
+const PORT = process.env.PORT || 5000;
+
+// --- GEREKLİ CONFIGLER ---
+const JWT_SECRET = 'SeninGizliAnahtarın123!'; // Burayı güçlü bir şifreyle değiştir
+
+// Middleware
+app.use(cors({
+  origin: '*',
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+app.use(express.json());
+app.use(helmet());
+
+// Rate limiting
+const isDev = process.env.NODE_ENV !== 'production';
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: isDev ? 10000 : 100,
+  message: 'Çok fazla istek gönderildi. Lütfen daha sonra tekrar deneyin.'
+});
+app.use(limiter);
+
+// Cloudinary config
+cloudinary.config({
+  cloud_name: 'dcurdits5',
+  api_key: '412449661867493',
+  api_secret: 'qonNvXK4mZVN00RNX5ghWa_0h_Q'
+});
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'aksumetal_uploads',
+    allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
+    transformation: [{ width: 1200, height: 800, crop: "limit" }],
+  },
+});
+const fileFilter = (req, file, cb) => {
+  const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+  if (allowedTypes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error('Sadece resim dosyaları yüklenebilir!'), false);
+  }
+};
+const upload = multer({ 
+  storage,
+  fileFilter,
+  limits: { fileSize: 5 * 1024 * 1024 }
+});
+
+// MongoDB bağlantısı
+mongoose.connect(
+  'mongodb+srv://iki1000alti:2006@cluster0.7ajjofx.mongodb.net/test?retryWrites=true&w=majority&appName=Cluster0',
+  { useNewUrlParser: true, useUnifiedTopology: true }
+)
+.then(() => console.log('MongoDB bağlantısı başarılı!'))
+.catch((err) => console.error('MongoDB bağlantı hatası:', err));
+
+// Basit bir test endpoint'i
+app.get('/', (req, res) => {
+  res.send('Backend çalışssıyor!');
+});
+
+// Input sanitization fonksiyonu
+function sanitizeInput(input) {
+  if (typeof input !== 'string') return input;
+  return input.trim().replace(/[<>]/g, '').substring(0, 1000);
+}
+
+// --- PROJE ENDPOINTLERİ ---
+// Tüm projeleri getir (kategoriye göre filtreleme destekli)
+app.get('/projects', async (req, res) => {
+  try {
+    const { category } = req.query;
+    let filter = {};
+    if (category && category !== 'Tümü') {
+      filter.category = category;
+    }
+    const projects = await Project.find(filter).sort({ createdAt: -1 });
+    res.json(projects);
+  } catch (error) {
+    res.status(500).json({ message: 'Projeler getirilirken bir hata oluştu.' });
+  }
+});
+// Tek proje getir
+app.get('/projects/:id', async (req, res) => {
+  try {
+    const project = await Project.findById(req.params.id);
+    if (!project) return res.status(404).json({ message: 'Proje bulunamadı' });
+    res.json(project);
+  } catch (error) {
+    res.status(500).json({ message: 'Proje getirilirken bir hata oluştu.' });
+  }
+});
+// Yeni proje ekle (çoklu resim destekli)
+app.post('/projects', protect, upload.array('images', 10), async (req, res) => {
+  const { title, description, category, defaultImage, defaultImageIndex } = req.body;
+  if (!title || !description || !category || !req.files || req.files.length === 0) {
+    return res.status(400).json({ message: 'Lütfen tüm alanları ve en az bir resim ekleyin.' });
+  }
+  try {
+    const imageUrls = req.files.map(file => file.path);
+    let defaultImg = imageUrls[0];
+    if (typeof defaultImageIndex !== 'undefined' && !isNaN(Number(defaultImageIndex)) && imageUrls[Number(defaultImageIndex)]) {
+      defaultImg = imageUrls[Number(defaultImageIndex)];
+    } else if (defaultImage && imageUrls.includes(defaultImage)) {
+      defaultImg = defaultImage;
+    }
+    const newProject = await Project.create({
+      title: sanitizeInput(title),
+      description: sanitizeInput(description),
+      category: sanitizeInput(category),
+      imageUrls,
+      defaultImage: defaultImg,
+      imageUrl: defaultImg,
+      createdBy: req.user.username,
+    });
+    await Log.create({ user: req.user.username, action: 'create_project', target: newProject._id.toString(), details: `Proje oluşturuldu: ${title}` });
+    res.status(201).json(newProject);
+  } catch (error) {
+    res.status(500).json({ message: 'Proje eklenirken bir hata oluştu.' });
+  }
+});
+// Proje güncelle (çoklu resim destekli)
+app.put('/projects/:id', protect, upload.array('images', 10), async (req, res) => {
+  try {
+    const { title, description, category, defaultImage } = req.body;
+    let existingImages = req.body.existingImages;
+    if (existingImages && !Array.isArray(existingImages)) {
+      existingImages = [existingImages];
+    }
+    const project = await Project.findById(req.params.id);
+    if (!project) return res.status(404).json({ message: 'Proje bulunamadı' });
+    // Silinen eski resimleri Cloudinary'den kaldır
+    if (Array.isArray(existingImages)) {
+      const toDelete = (project.imageUrls || []).filter(url => !existingImages.includes(url));
+      for (const url of toDelete) {
+        const publicId = url.split('/').slice(-2).join('/').split('.')[0];
+        try { await cloudinary.uploader.destroy(publicId); } catch (e) { /* ignore */ }
+      }
+    }
+    let imageUrls = Array.isArray(existingImages) ? [...existingImages] : (project.imageUrls || []);
+    if (req.files && req.files.length > 0) {
+      const newImageUrls = req.files.map(file => file.path);
+      imageUrls = imageUrls.concat(newImageUrls);
+    }
+    let defaultImg = defaultImage && imageUrls.includes(defaultImage) ? defaultImage : imageUrls[0];
+    const updatedData = {
+      title: sanitizeInput(title) || project.title,
+      description: sanitizeInput(description) || project.description,
+      category: sanitizeInput(category) || project.category,
+      imageUrls,
+      defaultImage: defaultImg,
+      imageUrl: defaultImg,
+    };
+    const updatedProject = await Project.findByIdAndUpdate(req.params.id, updatedData, { new: true });
+    await Log.create({ user: req.user.username, action: 'update_project', target: req.params.id, details: `Proje güncellendi: ${updatedProject.title}` });
+    res.json(updatedProject);
+  } catch (error) {
+    res.status(500).json({ message: 'Proje güncellenirken bir hata oluştu.' });
+  }
+});
+// Proje sil
+app.delete('/projects/:id', protect, async (req, res) => {
+  try {
+    const project = await Project.findById(req.params.id);
+    if (!project) return res.status(404).json({ message: 'Proje bulunamadı' });
+    await Project.deleteOne({ _id: req.params.id });
+    await Log.create({ user: req.user.username, action: 'delete_project', target: req.params.id, details: `Proje silindi: ${project.title}` });
+    res.json({ message: 'Proje başarıyla silindi' });
+  } catch (error) {
+    res.status(500).json({ message: 'Proje silinirken bir sunucu hatası oluştu.' });
+  }
+});
+// Proje beğen (like)
+app.post('/projects/:id/like', async (req, res) => {
+  try {
+    const project = await Project.findById(req.params.id);
+    if (!project) return res.status(404).json({ message: 'Proje bulunamadı' });
+    project.likes = (project.likes || 0) + 1;
+    await project.save();
+    res.json({ likes: project.likes });
+  } catch (error) {
+    res.status(500).json({ message: 'Beğeni artırılırken hata oluştu.' });
+  }
+});
+// Proje beğenisini geri al (unlike)
+app.post('/projects/:id/unlike', async (req, res) => {
+  try {
+    const project = await Project.findById(req.params.id);
+    if (!project) return res.status(404).json({ message: 'Proje bulunamadı' });
+    project.likes = Math.max((project.likes || 0) - 1, 0);
+    await project.save();
+    res.json({ likes: project.likes });
+  } catch (error) {
+    res.status(500).json({ message: 'Beğeni azaltılırken hata oluştu.' });
+  }
+});
+// Tüm projelerin beğenisini sıfırla
+app.post('/projects/clear-likes', async (req, res) => {
+  try {
+    await Project.updateMany({}, { $set: { likes: 0 } });
+    res.json({ message: 'Tüm projelerin beğenileri sıfırlandı.' });
+  } catch (error) {
+    res.status(500).json({ message: 'Beğeniler sıfırlanırken hata oluştu.' });
+  }
+});
+// --- LOGIN ENDPOINT ---
+app.post('/auth/login', async (req, res) => {
+  const { username, password } = req.body;
+  try {
+    const user = await User.findOne({ username });
+    if (!user) return res.status(401).json({ message: 'Geçersiz kullanıcı adı veya şifre' });
+    const isPasswordCorrect = await bcrypt.compare(password, user.passwordHash);
+    if (!isPasswordCorrect) return res.status(401).json({ message: 'Geçersiz kullanıcı adı veya şifre' });
+    user.lastLogin = new Date();
+    await user.save();
+    await Log.create({ user: user.username, action: 'login', details: 'Giriş yaptı' });
+    const token = jwt.sign({ id: user._id, username: user.username, role: user.role }, process.env.JWT_SECRET, { expiresIn: '1h' });
+    res.json({ token });
+  } catch (error) {
+    res.status(500).json({ message: 'Sunucuda bir hata oluştu' });
+  }
+});
+// --- SITE SETTINGS ENDPOINTLERİ ---
+app.get('/sitesettings', async (req, res) => {
+  try {
+    let settings = await SiteSettings.findOne();
+    if (!settings) {
+      settings = await SiteSettings.create({ siteName: 'AKSU METAL' });
+    }
+    res.json(settings);
+  } catch (error) {
+    res.status(500).json({ message: 'Site ayarları getirilirken hata oluştu.' });
+  }
+});
+app.put('/sitesettings', protect, async (req, res) => {
+  console.log('PUT /sitesettings endpointi çağrıldı, req.user:', req.user);
+  try {
+    if (req.user.role !== 'superadmin') return res.status(403).json({ message: 'Yetki yok' });
+    const { siteName, homepage, about, contact, footerText, logo, whatsapp, instagram, facebook } = req.body;
+    let settings = await SiteSettings.findOne();
+    if (!settings) {
+      settings = await SiteSettings.create({ siteName, homepage, about, contact });
+    } else {
+      if (siteName !== undefined) settings.siteName = siteName;
+      if (homepage !== undefined) settings.homepage = { ...settings.homepage, ...homepage };
+      if (about !== undefined) settings.about = { ...settings.about, ...about };
+      if (contact !== undefined) settings.contact = { ...settings.contact, ...contact };
+      if (footerText !== undefined) settings.footerText = footerText;
+      if (logo !== undefined) settings.logo = logo;
+      if (whatsapp !== undefined) settings.whatsapp = whatsapp;
+      if (instagram !== undefined) settings.instagram = instagram;
+      if (facebook !== undefined) settings.facebook = facebook;
+      await settings.save();
+    }
+    res.json(settings);
+  } catch (error) {
+    res.status(500).json({ message: 'Site ayarları güncellenirken hata oluştu.' });
+  }
+});
+// Slider görseli yükleme endpointi
+app.post('/sitesettings/slider-upload', protect, upload.single('image'), (req, res) => {
+  if (!req.file) return res.status(400).json({ message: 'Dosya yüklenemedi' });
+  res.json({ imageUrl: req.file.path });
+});
+// --- LOG ENDPOINTLERİ ---
+app.get('/logs', protect, async (req, res) => {
+  try {
+    if (req.user.role !== 'superadmin') return res.status(403).json({ message: 'Yetki yok' });
+    const logs = await Log.find().sort({ createdAt: -1 });
+    res.json(logs);
+  } catch (error) {
+    res.status(500).json({ message: 'Loglar getirilirken hata oluştu' });
+  }
+});
+app.delete('/logs', protect, async (req, res) => {
+  try {
+    if (req.user.role !== 'superadmin') return res.status(403).json({ message: 'Yetki yok' });
+    await Log.deleteMany({});
+    res.json({ message: 'Tüm loglar silindi' });
+  } catch (error) {
+    res.status(500).json({ message: 'Loglar silinirken hata oluştu' });
+  }
+});
+// --- USERS ENDPOINTLERİ ---
+// Kullanıcıları listele
+app.get('/users', protect, async (req, res) => {
+  if (req.user.role !== 'superadmin') return res.status(403).json({ message: 'Yetki yok' });
+  const users = await User.find();
+  res.json(users);
+});
+// Kullanıcı ekle
+app.post('/users', protect, async (req, res) => {
+  if (req.user.role !== 'superadmin') return res.status(403).json({ message: 'Yetki yok' });
+  const { username, password, role } = req.body;
+  if (!username || !password || !role) return res.status(400).json({ message: 'Eksik bilgi' });
+  const existing = await User.findOne({ username });
+  if (existing) return res.status(400).json({ message: 'Kullanıcı zaten var' });
+  const passwordHash = await bcrypt.hash(password, 10);
+  const user = await User.create({ username, passwordHash, role });
+  res.status(201).json(user);
+});
+// Kullanıcı güncelle
+app.put('/users/:id', protect, async (req, res) => {
+  if (req.user.role !== 'superadmin') return res.status(403).json({ message: 'Yetki yok' });
+  const { username, email, role } = req.body;
+  const user = await User.findByIdAndUpdate(req.params.id, { username, email, role }, { new: true });
+  if (!user) return res.status(404).json({ message: 'Kullanıcı bulunamadı' });
+  res.json(user);
+});
+// Kullanıcı sil
+app.delete('/users/:id', protect, async (req, res) => {
+  if (req.user.role !== 'superadmin') return res.status(403).json({ message: 'Yetki yok' });
+  const user = await User.findByIdAndDelete(req.params.id);
+  if (!user) return res.status(404).json({ message: 'Kullanıcı bulunamadı' });
+  res.json({ message: 'Kullanıcı silindi' });
+});
+// Şifre sıfırla
+app.post('/users/:id/reset-password', protect, async (req, res) => {
+  if (req.user.role !== 'superadmin') return res.status(403).json({ message: 'Yetki yok' });
+  const { newPassword } = req.body;
+  if (!newPassword) return res.status(400).json({ message: 'Yeni şifre gerekli' });
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+  const user = await User.findByIdAndUpdate(req.params.id, { passwordHash }, { new: true });
+  if (!user) return res.status(404).json({ message: 'Kullanıcı bulunamadı' });
+  res.json({ message: 'Şifre sıfırlandı' });
+});
+// --- HATA YAKALAMA ---
+app.use((error, req, res, next) => {
+  if (error instanceof multer.MulterError) {
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ message: 'Dosya boyutu çok büyük. Maksimum 5MB olmalı.' });
+    }
+    if (error.code === 'LIMIT_UNEXPECTED_FILE') {
+      return res.status(400).json({ message: 'Beklenmeyen dosya alanı.' });
+    }
+  }
+  if (error.message === 'Sadece resim dosyaları yüklenebilir!') {
+    return res.status(400).json({ message: error.message });
+  }
+  console.error('Sunucu hatası:', error);
+  res.status(500).json({ message: 'Sunucuda bir hata oluştu' });
+});
+
+app.listen(PORT, () => {
+  console.log(`Sunucu ${PORT} portunda çalışıyor`);
+});
