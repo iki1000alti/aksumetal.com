@@ -195,6 +195,9 @@ app.put(
     try {
       const { title, description, category, defaultImage } = req.body;
       let existingImages = req.body.existingImages;
+      if (!existingImages) {
+        existingImages = project.imageUrls || [];
+      }
       if (existingImages && !Array.isArray(existingImages)) {
         existingImages = [existingImages];
       }
@@ -212,6 +215,9 @@ app.put(
       if (req.files && req.files.length > 0) {
         const newImageUrls = req.files.map(file => file.path);
         imageUrls = imageUrls.concat(newImageUrls);
+      }
+      if (!imageUrls || imageUrls.length === 0) {
+        return res.status(400).json({ message: 'En az bir resim olmalı. (imageUrls boş)' });
       }
       let defaultImg = defaultImage && imageUrls.includes(defaultImage) ? defaultImage : imageUrls[0];
       const updatedData = {
@@ -490,6 +496,9 @@ app.put(
     try {
       const { title, description, category, defaultImage } = req.body;
       let existingImages = req.body.existingImages;
+      if (!existingImages) {
+        existingImages = project.imageUrls || [];
+      }
       if (existingImages && !Array.isArray(existingImages)) {
         existingImages = [existingImages];
       }
@@ -507,6 +516,9 @@ app.put(
       if (req.files && req.files.length > 0) {
         const newImageUrls = req.files.map(file => file.path);
         imageUrls = imageUrls.concat(newImageUrls);
+      }
+      if (!imageUrls || imageUrls.length === 0) {
+        return res.status(400).json({ message: 'En az bir resim olmalı. (imageUrls boş)' });
       }
       let defaultImg = defaultImage && imageUrls.includes(defaultImage) ? defaultImage : imageUrls[0];
       const updatedData = {
