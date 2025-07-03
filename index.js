@@ -26,7 +26,10 @@ const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET; // Artık .env dosyasından okunuyor
 
 // Middleware
-const allowedOrigins = (process.env.CORS_ORIGIN || '').split(',').map(o => o.trim());
+const allowedOrigins = [
+  'https://aksumetal.com',
+  'http://localhost:5173', // Geliştirme için
+];
 app.use(cors({
   origin: function(origin, callback) {
     // allow requests with no origin (like mobile apps, curl, etc.)
