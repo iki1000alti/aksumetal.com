@@ -183,9 +183,9 @@ app.put(
   protect,
   upload.array('images', 10),
   [
-    body('title').optional().isString().trim().isLength({ max: 100 }).withMessage('Başlık en fazla 100 karakter olmalı.'),
-    body('description').optional().isString().trim().isLength({ max: 1000 }).withMessage('Açıklama en fazla 1000 karakter olmalı.'),
-    body('category').optional().isString().trim().isLength({ max: 50 }).withMessage('Kategori en fazla 50 karakter olmalı.')
+    body('title').optional({ checkFalsy: true }).isString().trim().isLength({ max: 100 }),
+    body('description').optional({ checkFalsy: true }).isString().trim().isLength({ max: 1000 }),
+    body('category').optional({ checkFalsy: true }).isString().trim().isLength({ max: 50 })
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -404,9 +404,9 @@ app.post('/admin/users', protect, [
   res.status(201).json(user);
 });
 app.put('/admin/users/:id', protect, [
-  body('username').optional().isString().trim().isLength({ min: 3, max: 50 }),
-  body('email').optional().isEmail(),
-  body('role').optional().isString().isIn(['admin', 'superadmin'])
+  body('username').optional({ checkFalsy: true }).isString().trim().isLength({ min: 3, max: 50 }),
+  body('email').optional({ checkFalsy: true }).isEmail(),
+  body('role').optional({ checkFalsy: true }).isString().isIn(['admin', 'superadmin'])
 ], async (req, res) => {
   if (req.user.role !== 'superadmin') return res.status(403).json({ message: 'Yetki yok' });
   const errors = validationResult(req);
@@ -483,9 +483,9 @@ app.put(
   protect,
   upload.array('images', 10),
   [
-    body('title').optional().isString().trim().isLength({ max: 100 }).withMessage('Başlık en fazla 100 karakter olmalı.'),
-    body('description').optional().isString().trim().isLength({ max: 1000 }).withMessage('Açıklama en fazla 1000 karakter olmalı.'),
-    body('category').optional().isString().trim().isLength({ max: 50 }).withMessage('Kategori en fazla 50 karakter olmalı.')
+    body('title').optional({ checkFalsy: true }).isString().trim().isLength({ max: 100 }),
+    body('description').optional({ checkFalsy: true }).isString().trim().isLength({ max: 1000 }),
+    body('category').optional({ checkFalsy: true }).isString().trim().isLength({ max: 50 })
   ],
   async (req, res) => {
     if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ message: 'Yetki yok' });
