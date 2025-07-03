@@ -185,7 +185,7 @@ app.put(
   [
     body('title').optional().isString().trim().isLength({ max: 100 }).withMessage('Başlık en fazla 100 karakter olmalı.'),
     body('description').optional().isString().trim().isLength({ max: 1000 }).withMessage('Açıklama en fazla 1000 karakter olmalı.'),
-    body('category').optional().isString().trim().isLength({ min: 2, max: 50 }).withMessage('Kategori 2-50 karakter olmalı.')
+    body('category').optional().isString().trim().isLength({ max: 50 }).withMessage('Kategori en fazla 50 karakter olmalı.')
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -483,9 +483,9 @@ app.put(
   protect,
   upload.array('images', 10),
   [
-    body('title').optional().isString().trim().isLength({ min: 3, max: 100 }).withMessage('Başlık 3-100 karakter olmalı.'),
-    body('description').optional().isString().trim().isLength({ min: 10, max: 1000 }).withMessage('Açıklama 10-1000 karakter olmalı.'),
-    body('category').optional().isString().trim().isLength({ min: 2, max: 50 }).withMessage('Kategori 2-50 karakter olmalı.')
+    body('title').optional().isString().trim().isLength({ max: 100 }).withMessage('Başlık en fazla 100 karakter olmalı.'),
+    body('description').optional().isString().trim().isLength({ max: 1000 }).withMessage('Açıklama en fazla 1000 karakter olmalı.'),
+    body('category').optional().isString().trim().isLength({ max: 50 }).withMessage('Kategori en fazla 50 karakter olmalı.')
   ],
   async (req, res) => {
     if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ message: 'Yetki yok' });
