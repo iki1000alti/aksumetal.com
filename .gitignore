@@ -1,0 +1,3 @@
+# .gitignore dosyanda şu satır olmalı:
+.env
+node_modules

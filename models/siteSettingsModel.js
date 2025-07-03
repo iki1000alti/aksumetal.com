@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 
-const siteSettingsSchema = new mongoose.Schema({
+const settingsSchema = new mongoose.Schema({
   siteName: { type: String, default: 'AKSU METAL' },
   homepage: { type: Object, default: {} },
   about: { type: Object, default: {} },
@@ -12,4 +12,4 @@ const siteSettingsSchema = new mongoose.Schema({
   facebook: { type: String }
 });
 
-module.exports = mongoose.model('SiteSettings', siteSettingsSchema); 
+module.exports = mongoose.model('Settings', settingsSchema); 
